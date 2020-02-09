@@ -50,12 +50,14 @@ def filter_and_normalize(df, thres=500, eps=10**-5):
     df['delta_rank'] = df['delta_rank'].apply(lambda x: -thres if x < -thres else x)
     df['delta_rank'] = df['delta_rank'].apply(lambda x: thres if x > thres else x)
     df['normed_delta_rank'] = df['delta_rank'] / thres
-    df['normed_delta_rank'] = (1+df['normed_delta_rank'])/2
+    # 1-rank to penalize high winner rank vs. low looser rank and to reward
+    # low winner rank vs. high looser rank
+    df['normed_delta_rank'] = 1 - ((1+df['normed_delta_rank'])/2)
     df['normed_delta_rank'] += eps  # add epsilon to avoid obs zero success score
     return df
 
 
-def naive_success_score(score, rank_factor, eps = 10**-5):
+def naive_success_score(score, rank_factor, iswinner=True, eps = 10**-5):
     """
     calculates the naive score by games ratio
     :param score: score in string format of games won
@@ -76,10 +78,14 @@ def naive_success_score(score, rank_factor, eps = 10**-5):
     if winner + loser == 0:
         return -1
     # take maximum of loser, 1 to avoid division by zero
-    return  np.log((winner/max(1,loser)) + eps) * rank_factor
+    # rank factor will not change between loser\winner score
+    if iswinner:
+        return  np.log((winner/max(1,loser)) + eps) * rank_factor
+    else:
+        return np.log((loser / max(1, winner)) + eps) * rank_factor
 
 
-def ptc_based_success_score(row, eps=10**-5):
+def ptc_based_success_score(row, iswinner=True, eps=10**-5):
     """
     calculates the point based score
     :param row: data frame row
@@ -90,16 +96,22 @@ def ptc_based_success_score(row, eps=10**-5):
                  (row['w_svpt'] - (row['w_ace'] + row['w_1stWon'] + row['w_2ndWon']))
     if pd.isna(winner) or pd.isna(loser):
         return -1
-    # take maximum of loser, 1 to avoid division by zerp
-    return np.log((winner/max(1,loser)) + eps) * row['normed_delta_rank']
+    # take maximum of loser, 1 to avoid division by zero
+    if iswinner:
+        return np.log((winner/max(1,loser)) + eps) * row['normed_delta_rank']
+    else:
+        return np.log((loser / max(1, winner)) + eps) * row['normed_delta_rank']
 
 
 def generate_scores(df):
     """
     calculate success score by both metrics
     """
-    df['games_score'] = df.apply(lambda row: naive_success_score(row['score'], row['normed_delta_rank']), axis=1)
-    df['pts_score'] = df.apply(lambda row: ptc_based_success_score(row), axis=1)
+    df['games_score_winner'] = df.apply(lambda row: naive_success_score(row['score'], row['normed_delta_rank']), axis=1)
+    df['games_score_loser'] = df.apply(lambda row: naive_success_score(row['score'], row['normed_delta_rank'],
+                                                                       iswinner=False), axis=1)
+    df['pts_score_winner'] = df.apply(lambda row: ptc_based_success_score(row), axis=1)
+    df['pts_score_loser'] = df.apply(lambda row: ptc_based_success_score(row, iswinner=False), axis=1)
     return df
 
 
