@@ -2,9 +2,10 @@ import pandas as pd
 import numpy as np
 from sklearn.neighbors import DistanceMetric
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 
-def assign_treatment(row, player_id):
+def assign_treatment_L(row, player_id):
     """
     helper function for treatment assignment --> treated is when your opponent is lefty
     """
@@ -19,79 +20,94 @@ def assign_treatment(row, player_id):
         return 0
 
 
-def Match_per_player(player_data, player_id):
+def assign_treatment_diff(row, player_id=1):
     """
-    calculate ITE per player per year
-    :param player_data: dataframe containing all player matches
-    :return: ITE for player i
+    helper function for treatment assignment --> treated is when your opponent is lefty
     """
-    player_hand = player_data[player_data['winner_id'] == player_id]['winner_hand'].values[0]
-    player_data['T'] = player_data.apply(lambda row: assign_treatment(row, player_id), axis=1)
-
-    # player id is the winner
-    win = player_data[player_data['winner_id'] == player_id]
+    return row['loser_hand'] != row['winner_hand']
 
 
-
-
-
-
-
-
-def Match(data, features, dist_metric='euclidean', caliper=0.05, delta=100, corr_mode=False, IV=None):
+def player_score(df):
     """
-    implementation of the matching algorithm for ATT calculation based on 1NN matching
-    # based on the paper Austin 2011
-    :param data: input dataframe
-    :param features: feature column names in raw datafile
-    :param dist_metric: distance metric default EU
-    :param caliper: threshold for regulation
-    :param delta: regulation coefficient
-    :param corr_mode: whether to use correlation as a distance metric
-    :param IV: invert covariance matrix for data
-    :return: dataframe contains neighbors information - distance and index in input
+    create a dataframe with a score per player per year for ITE calculation
+    :param df: all matches data
+    :param scoring: scoring function
     """
-    # scale data
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(data[features])
-    scaled = pd.DataFrame(scaled, columns=features, index=data.index)
+    col_names = ['player_id', 'year', 'player_name', 'games_score','pts_score']
+    win_player_df =  df[['winner_id', 'year', 'winner_name', 'games_score_winner', 'pts_score_winner']].dropna()
+    lose_player_df = df[['loser_id', 'year', 'loser_name', 'games_score_loser', 'pts_score_loser']].dropna()
 
-    for feat in scaled.columns:
-        data[feat] = scaled[feat]
+    # adapt columns names for concatenation
+    win_player_df.rename(columns={win_player_df.columns[i]:col_names[i] for i in range(len(col_names))}, inplace=True)
+    lose_player_df.rename(columns={lose_player_df.columns[i]: col_names[i] for i in range(len(col_names))}, inplace=True)
 
-    # calculate pairwise distance
-    if corr_mode:
-        dist_np = 1 - data[features].T.corr()  # corr to distance
-    elif dist_metric == 'mahalanobis':
-        dist = DistanceMetric.get_metric('mahalanobis', VI=IV)
-        dist_np = dist.pairwise(data[features])
+    all_players = pd.concat([win_player_df, lose_player_df])
+    grouped_players = all_players.groupby(['player_id', 'year', 'player_name']).\
+        agg({'games_score':['mean','median'],'pts_score':['mean','median']}).reset_index()
+    grouped_players.columns = [' '.join(col).strip() for col in grouped_players.columns.values]
+
+    return grouped_players
+
+
+def ITE(player_data, scores, player_id, t, feature='games_score mean'):
+    """
+    calculate ITE by player scores per year.
+    :param player_id: the id of the player
+    :param scores: s dataframe with scores per player per year
+    :param t: treatmet. binary.
+    :param player_data: dataframe containing all the matches of the plkayer
+    :param feature: the score feature (pts\ games etc..)
+    :return: ITE
+    """
+
+    player_data = player_data[player_data['T'] == t]
+    player_scores = scores[scores['player_id'] == player_id]
+    ite = 0
+    nans = 0
+    for year in player_scores['year']:
+        year_matches= player_data[player_data['year'] == year]
+        opponents_ids = set(list(year_matches['winner_id']) + list(year_matches['loser_id'])) - {player_id}
+        opponent_score = scores[(scores['player_id'].isin(opponents_ids)) & (scores['year'] == year)][feature].mean()
+        player_score = player_scores[player_scores['year'] == year][feature].values[0]
+        # print(year, player_score, opponent_score, year_matches.shape, t)
+        if np.isnan(player_score) or np.isnan(opponent_score):
+            nans += 1
+            continue
+        ite += (player_score - opponent_score)
+    try:
+        ite = ite/(player_scores.shape[0]-nans)
+    except ZeroDivisionError:
+        return None
+    if t == 1:
+        return ite
     else:
-        dist = DistanceMetric.get_metric(dist_metric)
-        dist_np = dist.pairwise(data[features])
+        return -ite
 
-    dist_df = pd.DataFrame(dist_np, index=data.index, columns=data.index)
 
-    # add regularization by weighting matrix defined by caliper and delta
-    pr = data['Propensity']
-    reg_dict = dict()
-    for i in pr.index:
-        reg_dict[i] = (abs(pr[i] - pr) > caliper) * delta
-    reg_df = pd.DataFrame(reg_dict, index=data.index, columns=data.index)
 
-    # combine distance with regulation
-    dist_df = reg_df + dist_df
+def Match(data, scores, feature='games_score mean', treatment_func=assign_treatment_L):
+    """
+    Matching algorithm implementation
+    """
+    dfs = []
+    for player_id in tqdm(scores['player_id'].unique()):
+        # filter data to contain only players matches
+        player_data = data[(data['winner_id'] == player_id) | (data['loser_id'] == player_id)]
+        player_data['T'] = player_data.apply(lambda row: treatment_func(row, player_id), axis=1)
 
-    # filter data to contain treated (rows) and controls (columns)
-    treated_idx = data[data['T'] == 1].index
-    control_idx = data[data['T'] == 0].index
+        ite_t1 = ITE(player_data, scores, player_id, t=1, feature=feature)
+        ite_t0 = ITE(player_data, scores, player_id, t=0, feature=feature)
+        cur_df = pd.DataFrame({'player_id':player_id, 'ITE_T=0':ite_t0, 'ITE_T=1':ite_t1}, index=[0])
+        dfs.append(cur_df)
 
-    filtered_data = dist_df[dist_df.index.isin(treated_idx)][control_idx]
+    return pd.concat(dfs)
 
-    # return 1-nearest neighbor
-    filtered_data['knn'] = filtered_data.apply(lambda row: (row.nsmallest(n=1).index.to_list(),
-                                                            row.nsmallest(n=1).to_list()), axis=1)
-
-    filtered_data['knn_index'] = filtered_data['knn'].apply(lambda x: x[0][0])
-    filtered_data['knn_dist'] = filtered_data['knn'].apply(lambda x: x[-1][0])
-
-    return filtered_data[['knn_dist', 'knn_index']]
+if __name__ == "__main__":
+    data = pd.read_csv(r'../../data/full_data.csv')
+    scores = player_score(data)
+    for f in [assign_treatment_L, assign_treatment_diff]:
+        print(f.__name__)
+        res = Match(data, scores, treatment_func=f)
+        res = res.dropna()
+        ATE = np.mean(res[['ITE_T=1', 'ITE_T=0']].values.flatten())
+        print(ATE)
