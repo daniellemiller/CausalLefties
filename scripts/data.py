@@ -76,7 +76,7 @@ def naive_success_score(score, rank_factor, iswinner=True, eps = 10**-5):
         except:
             pass
     if winner + loser == 0:
-        return -1
+        return None
     # take maximum of loser, 1 to avoid division by zero
     # rank factor will not change between loser\winner score
     if iswinner:
@@ -95,7 +95,7 @@ def ptc_based_success_score(row, iswinner=True, eps=10**-5):
     loser = row['l_ace'] + row['l_1stWon'] + row['l_2ndWon'] + \
                  (row['w_svpt'] - (row['w_ace'] + row['w_1stWon'] + row['w_2ndWon']))
     if pd.isna(winner) or pd.isna(loser):
-        return -1
+        return None
     # take maximum of loser, 1 to avoid division by zero
     if iswinner:
         return np.log((winner/max(1,loser)) + eps) * row['normed_delta_rank']
