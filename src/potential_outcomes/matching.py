@@ -27,15 +27,15 @@ def assign_treatment_diff(row, player_id=1):
     return row['loser_hand'] != row['winner_hand']
 
 
-def player_score(df):
+def player_score(df, feature='games_score'):
     """
     create a dataframe with a score per player per year for ITE calculation
     :param df: all matches data
-    :param scoring: scoring function
+    :param feature: score feature name
     """
-    col_names = ['player_id', 'year', 'player_name', 'games_score','pts_score']
-    win_player_df =  df[['winner_id', 'year', 'winner_name', 'games_score_winner', 'pts_score_winner']].dropna()
-    lose_player_df = df[['loser_id', 'year', 'loser_name', 'games_score_loser', 'pts_score_loser']].dropna()
+    col_names = ['player_id', 'year', 'player_name'] + [feature]
+    win_player_df =  df[['winner_id', 'year', 'winner_name', f'{feature}_winner']].dropna()
+    lose_player_df = df[['loser_id', 'year', 'loser_name', f'{feature}_loser']].dropna()
 
     # adapt columns names for concatenation
     win_player_df.rename(columns={win_player_df.columns[i]:col_names[i] for i in range(len(col_names))}, inplace=True)
@@ -43,7 +43,7 @@ def player_score(df):
 
     all_players = pd.concat([win_player_df, lose_player_df])
     grouped_players = all_players.groupby(['player_id', 'year', 'player_name']).\
-        agg({'games_score':['mean','median'],'pts_score':['mean','median']}).reset_index()
+        agg({feature:['mean','median']}).reset_index()
     grouped_players.columns = [' '.join(col).strip() for col in grouped_players.columns.values]
 
     return grouped_players
@@ -104,6 +104,9 @@ def Match(data, scores, feature='games_score mean', treatment_func=assign_treatm
 
 if __name__ == "__main__":
     data = pd.read_csv(r'../../data/full_data.csv')
+    # workaround for weird edge-case when -1 is some reason stays
+    for col in ['games_score_winner', 'games_score_loser', 'pts_score_winner', 'pts_score_loser']:
+        data[col] = data[col].apply(lambda x: np.NaN if x == -1 else x)
     scores = player_score(data)
     for f in [assign_treatment_L, assign_treatment_diff]:
         print(f.__name__)
