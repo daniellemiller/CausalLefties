@@ -43,7 +43,7 @@ def player_score(df, feature='games_score'):
 
     all_players = pd.concat([win_player_df, lose_player_df])
     grouped_players = all_players.groupby(['player_id', 'year', 'player_name']).\
-        agg({feature:['mean','median']}).reset_index()
+        agg({feature:['mean', 'median', 'count']}).reset_index()
     grouped_players.columns = [' '.join(col).strip() for col in grouped_players.columns.values]
 
     return grouped_players
