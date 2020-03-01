@@ -1,0 +1,11 @@
+model,score,ATE
+LR,games_score_winner,0.003981713225361612
+LR,games_score_loser,-0.007996706601804727
+LR_no_std,games_score_winner,0.0039817132253617635
+LR_no_std,games_score_loser,-0.007996706601803493
+Ridge_no_std,games_score_winner,0.003981349934399027
+Ridge_no_std,games_score_loser,-0.007995541450672517
+RF,games_score_winner,6.094463533805684e-05
+RF,games_score_loser,-6.414553388770807e-05
+Ridge,games_score_winner,0.003982242394015514
+Ridge,games_score_loser,-0.007997137539966694
