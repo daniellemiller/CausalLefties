@@ -102,7 +102,7 @@ def S_learner(data, y_col='score', model=LinearRegression(), k=10):
 
 
 if __name__ == "__main__":
-    males_case = False
+    males_case = True
     if males_case:
         data = pd.read_csv(r'../../data/full_data.csv')
         out_dir = r'../../outputs/'
@@ -128,11 +128,13 @@ if __name__ == "__main__":
     for name, mdl in mdls:
         print(name)
         for score_column in tqdm(score_columns):
+            if score_column not in factorized_data.columns:
+                continue
             curr_data = factorized_data.copy()
             # assign T only for case when hand are different since S-learner works per match and not per player
             curr_data['T'] = curr_data.apply(lambda row: row['winner_hand'] != row['loser_hand'], axis=1)
             curr_data['Y'] = curr_data[score_column]
-            curr_data.drop(columns=score_columns, inplace=True)
+            curr_data.drop(columns=set(score_columns)&set(curr_data.columns), inplace=True)
             curr_mdl = clone(mdl)
             ate = S_learner(curr_data, 'Y', curr_mdl)
             ate_dict[name, score_column] = ate
