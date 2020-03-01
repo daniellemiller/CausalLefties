@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import os
+import pickle
+pd.options.mode.chained_assignment = None
 
 
 def assign_treatment_L(row, player_id):
@@ -48,27 +50,35 @@ def player_score(df, feature='games_score', treatment_func=assign_treatment_diff
     :param treatment_func: treatment function to separate case-control populations
     """
     col_names = ['player_id', 'year'] + [feature]
-    win_player_df =  df[['winner_id', 'year', f'{feature}_winner']].dropna()
-    lose_player_df = df[['loser_id', 'year', f'{feature}_loser']].dropna()
-
-    # adapt columns names for concatenation
-    win_player_df.rename(columns={win_player_df.columns[i]:col_names[i] for i in range(len(col_names))}, inplace=True)
-    lose_player_df.rename(columns={lose_player_df.columns[i]: col_names[i] for i in range(len(col_names))}, inplace=True)
-
-    all_players = pd.concat([win_player_df, lose_player_df])
+    filtered_df = df[['winner_id', 'loser_id', 'winner_hand', 'loser_hand', 'year',
+                      f'{feature}_winner', f'{feature}_loser']].dropna()
 
     scores = dict()
-    for player_id in tqdm(all_players['player_id'].unique()):
-        player_data = all_players[all_players['player_id'] == player_id]
+    for player_id in tqdm(set(filtered_df.winner_id) | set(filtered_df.loser_id)):
+        player_data = filtered_df[(filtered_df['winner_id'] == player_id) | (filtered_df['loser_id'] == player_id)]
         player_data['T'] = player_data.apply(lambda row: treatment_func(row, player_id), axis=1)
-        score_by_year = player_data.groupby(['T', 'year'])[feature].mean()
+
+        # split cases due to different score assignment
+        score_by_year_winner = \
+            player_data[player_data['winner_id'] == player_id].rename(columns={f'{feature}_winner': feature}).groupby(
+                ['T', 'year'])[feature].agg(['sum', 'count']).reset_index()
+
+        score_by_year_loser = \
+            player_data[player_data['loser_id'] == player_id].rename(columns={f'{feature}_loser': feature}).groupby(
+                ['T', 'year'])[feature].agg(['sum', 'count']).reset_index()
+
+        player_score_by_year = pd.concat([score_by_year_winner, score_by_year_loser])
+
+        score_by_year = player_score_by_year.groupby(['year', 'T']).sum().reset_index()
+        score_by_year['score'] = score_by_year['sum'] / score_by_year['count']
         scores[player_id] = score_by_year
 
     res = []
     for player_id in scores.keys():
-        for (t, year), score in scores[player_id].iteritems():
-            res.append([player_id, int(t), year, score])
+        for idx, row in scores[player_id].iterrows():
+            res.append([player_id, int(row['T']), row['year'], row['score']])
     return pd.DataFrame(res, columns=['player_id', 'T', 'year', 'score'])
+
 
 def naive_player_score(df, treatment_func=assign_treatment_diff):
     """
@@ -129,8 +139,10 @@ def ITE(player_data, scores, player_id, t, mapper, feature='score', min_games=5)
         opponent_score_t1 = scores[(scores['player_id'].isin(opponent_2_t[1])) &
                                    (scores['year'] == year) & (scores['T'] == 1)][feature].values
         opponent_score = np.concatenate((opponent_score_t0, opponent_score_t1), axis=None).mean()
-
-        player_score = player_scores[(player_scores['year'] == year) & (player_scores['T'] == t)][feature].values[0]
+        try:
+            player_score = player_scores[(player_scores['year'] == year) & (player_scores['T'] == t)][feature].values[0]
+        except:
+            player_score = np.NaN
         # print(year, player_score, opponent_score, year_matches.shape, t)
         if np.isnan(player_score) or np.isnan(opponent_score):
             nans += 1
@@ -188,15 +200,20 @@ def parse_match(match_result):
 
 if __name__ == "__main__":
     data = pd.read_csv(r'../../data/full_data.csv')
-    out_dir = '../../outputs/'
+    out_dir = r'../../outputs/'
+    mapper_path = r'../../outputs/mapper.pickle'
     # workaround for weird edge-case when -1 is some reason stays
     for col in ['games_score_winner', 'games_score_loser', 'pts_score_winner', 'pts_score_loser']:
         data[col] = data[col].apply(lambda x: np.NaN if x == -1 else x)
 
     print("Pre-calculate treatment groups")
-    mapper = {}
-    mapper['assign_treatment_L'] = calc_T_per_game(data, assign_treatment_L)
-    mapper['assign_treatment_diff'] = calc_T_per_game(data, assign_treatment_diff)
+    if not os.path.exists(mapper_path):
+        mapper = {}
+        mapper['assign_treatment_L'] = calc_T_per_game(data, assign_treatment_L)
+        mapper['assign_treatment_diff'] = calc_T_per_game(data, assign_treatment_diff)
+    else:
+        with open(mapper_path, 'rb') as f:
+            mapper = pickle.load(f)
     print("Starting Matching by treatment and feature score")
     for f in [assign_treatment_L, assign_treatment_diff]:
         for score_type in ['naive', 'games_score', 'pts_score']:
@@ -205,6 +222,6 @@ if __name__ == "__main__":
                 scores = naive_player_score(data, treatment_func=f)
             else:
                 scores = player_score(data, feature=score_type, treatment_func=f)
-            matched = Match(data, scores, mapper=mapper, treatment_func=f)
+            matched, _ = Match(data, scores, mapper=mapper, treatment_func=f)
             parsed_matched = parse_match(matched)
             parsed_matched.to_csv(os.path.join(out_dir, f'MATCH_{f.__name__}_{score_type}.csv'), index=False)
