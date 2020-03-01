@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
-from sklearn.neighbors import DistanceMetric
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+import os
 
 
 def assign_treatment_L(row, player_id):
@@ -40,29 +39,63 @@ def calc_T_per_game(data, treatment_func):
         res_d.setdefault(p2,dict())[p1] = (t2,t1)
     return res_d
 
-def player_score(df, feature='games_score'):
+
+def player_score(df, feature='games_score', treatment_func=assign_treatment_diff):
     """
     create a dataframe with a score per player per year for ITE calculation
     :param df: all matches data
     :param feature: score feature name
+    :param treatment_func: treatment function to separate case-control populations
     """
-    col_names = ['player_id', 'year', 'player_name'] + [feature]
-    win_player_df =  df[['winner_id', 'year', 'winner_name', f'{feature}_winner']].dropna()
-    lose_player_df = df[['loser_id', 'year', 'loser_name', f'{feature}_loser']].dropna()
+    col_names = ['player_id', 'year'] + [feature]
+    win_player_df =  df[['winner_id', 'year', f'{feature}_winner']].dropna()
+    lose_player_df = df[['loser_id', 'year', f'{feature}_loser']].dropna()
 
     # adapt columns names for concatenation
     win_player_df.rename(columns={win_player_df.columns[i]:col_names[i] for i in range(len(col_names))}, inplace=True)
     lose_player_df.rename(columns={lose_player_df.columns[i]: col_names[i] for i in range(len(col_names))}, inplace=True)
 
     all_players = pd.concat([win_player_df, lose_player_df])
-    grouped_players = all_players.groupby(['player_id', 'year', 'player_name']).\
-        agg({feature:['mean', 'median', 'count']}).reset_index()
-    grouped_players.columns = [' '.join(col).strip() for col in grouped_players.columns.values]
 
-    return grouped_players
+    scores = dict()
+    for player_id in tqdm(all_players['player_id'].unique()):
+        player_data = all_players[all_players['player_id'] == player_id]
+        player_data['T'] = player_data.apply(lambda row: treatment_func(row, player_id), axis=1)
+        score_by_year = player_data.groupby(['T', 'year'])[feature].mean()
+        scores[player_id] = score_by_year
+
+    res = []
+    for player_id in scores.keys():
+        for (t, year), score in scores[player_id].iteritems():
+            res.append([player_id, int(t), year, score])
+    return pd.DataFrame(res, columns=['player_id', 'T', 'year', 'score'])
+
+def naive_player_score(df, treatment_func=assign_treatment_diff):
+    """
+    create a dataframe with wins percentage as score per player per year for ITE calculation
+    :param df: all matches data
+    :param treatment_func: treatment function to separate case-control populations
+    :return: dataframe with score per player per year per T
+    """
+    scores = dict()
+    for player_id in tqdm(set(df.winner_id) | set(df.loser_id)):
+        # filter data to contain only players matches
+        player_data = df[(df['winner_id'] == player_id) | (df['loser_id'] == player_id)]
+        player_data['T'] = player_data.apply(lambda row: treatment_func(row, player_id), axis=1)
+        # calculate the number win\lose matches for each player by T by year
+        win_by_year = player_data[player_data.winner_id == player_id].groupby(['T', 'year']).size()
+        lose_by_year = player_data[player_data.loser_id == player_id].groupby(['T', 'year']).size()
+        win_lose = pd.DataFrame({'win': win_by_year, 'lose': lose_by_year}).fillna(0)
+        scores[player_id] = win_lose['win']/(win_lose['win']+win_lose['lose'])
+
+    res = []
+    for player_id in scores.keys():
+        for (t, year), score in scores[player_id].iteritems():
+            res.append([player_id, int(t), year, score])
+    return pd.DataFrame(res,columns=['player_id', 'T', 'year', 'score'])
 
 
-def ITE(player_data, scores, player_id, t, mapper, feature='games_score mean', min_games=5):
+def ITE(player_data, scores, player_id, t, mapper, feature='score', min_games=5):
     """
     calculate ITE by player scores per year.
     :param player_id: the id of the player
@@ -106,11 +139,10 @@ def ITE(player_data, scores, player_id, t, mapper, feature='games_score mean', m
             ite[year] = (player_score - opponent_score)
         else:
             ite[year] = -(player_score - opponent_score)
-    #     print(len(ite))
     return ite, nans, not_enough_games
 
 
-def Match(data, scores, mapper, feature='games_score mean', treatment_func=assign_treatment_L, random_mode=False,
+def Match(data, scores, mapper, feature='score', treatment_func=assign_treatment_L, random_mode=False,
           min_games=5):
     """
     Matching algorithm implementation
@@ -138,20 +170,41 @@ def Match(data, scores, mapper, feature='games_score mean', treatment_func=assig
     return d, no_games_d
 
 
+def parse_match(match_result):
+    """
+    parse the matching results
+    :param match_result: dictionary created by the Match function containing the ITE per player per T.
+    """
+    lst = []
+    for player_id in match_result:
+        t0_d = match_result[player_id][0]   # extract ite per player for control
+        t1_d = match_result[player_id][1]    # extract ite per player for case
+        for year in t0_d.keys() | t1_d.keys():
+            lst.append((player_id, year, t0_d.get(year, np.NaN), t1_d.get(year, np.NaN)))
+
+    res_df = pd.DataFrame(lst, columns=['player_id', 'year', 'ite_t0','ite_t1']).dropna()
+    return res_df
+
+
 if __name__ == "__main__":
     data = pd.read_csv(r'../../data/full_data.csv')
+    out_dir = '../../outputs/'
     # workaround for weird edge-case when -1 is some reason stays
     for col in ['games_score_winner', 'games_score_loser', 'pts_score_winner', 'pts_score_loser']:
         data[col] = data[col].apply(lambda x: np.NaN if x == -1 else x)
-    scores = player_score(data)
 
-    t_mapping = {}
-    t_mapping['assign_treatment_L'] = calc_T_per_game(data, assign_treatment_L)
-    t_mapping['assign_treatment_diff'] = calc_T_per_game(data, assign_treatment_diff)
-
+    print("Pre-calculate treatment groups")
+    mapper = {}
+    mapper['assign_treatment_L'] = calc_T_per_game(data, assign_treatment_L)
+    mapper['assign_treatment_diff'] = calc_T_per_game(data, assign_treatment_diff)
+    print("Starting Matching by treatment and feature score")
     for f in [assign_treatment_L, assign_treatment_diff]:
-        print(f.__name__)
-        res = Match(data, scores, treatment_func=f)
-        res = res.dropna()
-        ATE = np.mean(res[['ITE_T=1', 'ITE_T=0']].values.flatten())
-        print(ATE)
+        for score_type in ['naive', 'games_score', 'pts_score']:
+            print('Treatment assigned: ', f.__name__, f" for {score_type}")
+            if score_type == 'naive':
+                scores = naive_player_score(data, treatment_func=f)
+            else:
+                scores = player_score(data, feature=score_type, treatment_func=f)
+            matched = Match(data, scores, mapper=mapper, treatment_func=f)
+            parsed_matched = parse_match(matched)
+            parsed_matched.to_csv(os.path.join(out_dir, f'MATCH_{f.__name__}_{score_type}.csv'), index=False)
