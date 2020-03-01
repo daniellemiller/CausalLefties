@@ -21,12 +21,17 @@ def get_date(val):
     return date.split('/')[2]
 
 
-def load_data():
+def load_data(males_case=True):
     """
+    :param males_case - which data directory to access
     load and prepare dataset located in data folder
     """
-    matches_1 = glob.glob(r'../data/atp_matches_1*.csv')
-    matches_2 = glob.glob(r'../data/atp_matches_2*.csv')
+    if males_case:
+        matches_1 = glob.glob(r'../data/atp_matches_1*.csv')
+        matches_2 = glob.glob(r'../data/atp_matches_2*.csv')
+    else:
+        matches_1 = glob.glob(r'../women_data/wta_matches_1*.csv')
+        matches_2 = glob.glob(r'../women_data/wta_matches_2*.csv')
     matches = matches_1 + matches_2
 
     df = pd.concat([pd.read_csv(f) for f in tqdm(matches)], sort=False)  # keep the original col order
@@ -116,18 +121,22 @@ def generate_scores(df):
 
 
 if __name__ == "__main__":
-
-    if not os.path.exists(r'../data/full_data.csv'):
+    males_case = False
+    if males_case:
+        file_path = r'../data/full_data.csv'
+    else:
+        file_path = r'../women_data/full_data.csv'
+    if not os.path.exists(file_path):
         print("Loading data...")
-        df = load_data()
+        df = load_data(males_case)
         print("Data loaded, Filter and Normalize...")
         normalized = filter_and_normalize(df)
         print("Done normalizing, fitting success scores...")
         scored = generate_scores(normalized)
         print("Done!!")
-        scored.to_csv(r'../data/full_data.csv', index=False)
+        scored.to_csv(file_path, index=False)
     else:
-        scored = pd.read_csv(r'../data/full_data.csv')
+        scored = pd.read_csv(file_path)
 
 
 

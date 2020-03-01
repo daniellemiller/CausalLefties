@@ -199,9 +199,15 @@ def parse_match(match_result):
 
 
 if __name__ == "__main__":
-    data = pd.read_csv(r'../../data/full_data.csv')
-    out_dir = r'../../outputs/'
-    mapper_path = r'../../outputs/mapper.pickle'
+    males_case = False
+    if males_case:
+        data = pd.read_csv(r'../../data/full_data.csv')
+        out_dir = r'../../outputs/'
+        mapper_path = r'../../outputs/mapper.pickle'
+    else:
+        data = pd.read_csv(r'../../women_data/full_data.csv')
+        out_dir = r'../../women_outputs/'
+        mapper_path = r'../../women_outputs/mapper.pickle'
     # workaround for weird edge-case when -1 is some reason stays
     for col in ['games_score_winner', 'games_score_loser', 'pts_score_winner', 'pts_score_loser']:
         data[col] = data[col].apply(lambda x: np.NaN if x == -1 else x)
@@ -211,6 +217,8 @@ if __name__ == "__main__":
         mapper = {}
         mapper['assign_treatment_L'] = calc_T_per_game(data, assign_treatment_L)
         mapper['assign_treatment_diff'] = calc_T_per_game(data, assign_treatment_diff)
+        with open(mapper_path, 'wb') as f:
+            pickle.dump(mapper, f)
     else:
         with open(mapper_path, 'rb') as f:
             mapper = pickle.load(f)

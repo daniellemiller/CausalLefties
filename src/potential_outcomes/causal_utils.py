@@ -102,9 +102,13 @@ def S_learner(data, y_col='score', model=LinearRegression(), k=10):
 
 
 if __name__ == "__main__":
-    data = pd.read_csv(r'../../data/full_data.csv')
-    out_dir = r'../../outputs/'
-
+    males_case = False
+    if males_case:
+        data = pd.read_csv(r'../../data/full_data.csv')
+        out_dir = r'../../outputs/'
+    else:
+        data = pd.read_csv(r'../../women_data/full_data.csv')
+        out_dir = r'../../women_outputs/'
     mdls = [
         ("LR", Pipeline([
             ("std", StandardScaler()),
