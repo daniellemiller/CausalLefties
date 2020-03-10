@@ -15,14 +15,13 @@ sklearn and tqdm
 ### Content:
 There are several folders in the repository:<br />
 data - the download tennis_atp dataset. A combined file called full_data.csv is included.
-<br />
+<br /><br />
 women_data - the download tennis_wta dataset. A combined file called full_data.csv is included.
-<br />
+<br /><br />
 scripts - contans the data.py which handles the initial digestion of the inputs.
-<br />
+<br /><br />
 src - the code itself. potential_outcomes.matching.py addresees the matching approach<br />
-	  and potential_outcomes.causal_utils.py the S-learner approac
-<br />
+	  and potential_outcomes.causal_utils.py the S-learner approach.<br />
 outputs - results of our runs on the data folder:<br />
 * MATCH...csv - results of matching algorithm for different scoring and treatment assignment functions
 * SLEARNER.csv - results of s-learner
