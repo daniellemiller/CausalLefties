@@ -28,8 +28,8 @@ outputs - results of our runs on the data folder:<br />
 * ITE_by... - Figures used in the final paper, ITE results from several perspectives.
 * enrichments_PVALS - Figure presenting the results from Fisher's exact test
 * number_players and dominant_hand - Figures used in the paper to explain the data.
-* data_for_learning and mapper - partial results saved to reduce operations
-<br />
+* data_for_learning and mapper - partial results saved to reduce operations<br />
+
 women_outputs - results of our runs on the data folder:<br />
 * MATCH...csv - results of matching algorithm for different scoring and treatment assignment functions
 * SLEARNER.csv - results of s-learner
